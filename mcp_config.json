@@ -1,0 +1,74 @@
+{
+  "mcpServers": {
+    "copernicus-eo": {
+      "command": "copernicus-mcp",
+      "args": [],
+      "env": {
+        "COPERNICUS_DEBUG_AUTH": "true"
+      },
+      "disabled": false,
+      "autoApprove": [],
+      "description": "Copernicus Earth Observation MCP Server - Access satellite imagery from Copernicus Sentinel missions with comprehensive search, download, and file management capabilities."
+    }
+  },
+  "toolDescriptions": {
+    "copernicus-eo": {
+      "search_copernicus_images": "Search for Copernicus satellite images for a given region. Supports point, polygon, and bounding box geometries with date range and cloud cover filtering.",
+      "get_image_details": "Get comprehensive metadata for a specific satellite image including download URL, processing level, and technical specifications.",
+      "get_mission_info": "Get detailed information about Copernicus satellite missions including capabilities, sensors, and applications.",
+      "get_recent_images": "Get the most recent satellite images for a region with configurable date range and mission filtering.",
+      "check_coverage": "Check satellite image coverage for a region over time with monthly aggregation and mission-specific analysis.",
+      "download_image": "Download a Copernicus satellite image by ID. Supports full products, quicklook previews, and compressed versions. Requires authentication.",
+      "batch_download_images": "Download multiple Copernicus satellite images concurrently with progress tracking and error handling. Requires authentication.",
+      "check_download_availability": "Check if Copernicus satellite images are available for download with detailed status and size information.",
+      "get_product_download_links": "Get all available download links for a Copernicus satellite image including full, compressed, and quicklook URLs.",
+      "search_and_download": "Search for Copernicus satellite images and automatically download the best match based on recency, cloud cover, and processing level.",
+      "list_downloaded_files": "List downloaded Copernicus satellite image files with filtering by file type, size, and modification time.",
+      "cleanup_downloads": "Clean up downloaded files based on age, size, or file type criteria with dry-run mode for safety.",
+      "get_download_statistics": "Get comprehensive statistics about downloaded files including breakdown by mission, file type, and time period."
+    }
+  },
+  "authentication": {
+    "required": {
+      "download_image": true,
+      "batch_download_images": true,
+      "check_download_availability": true,
+      "get_product_download_links": true,
+      "search_and_download": true
+    },
+    "environment_variables": {
+      "COPERNICUS_USERNAME": "Your Copernicus Data Space email address",
+      "COPERNICUS_PASSWORD": "Your Copernicus Data Space password"
+    },
+    "registration_url": "https://dataspace.copernicus.eu/",
+    "notes": "Search operations work without authentication. Download operations require valid credentials."
+  },
+  "usageExamples": {
+    "basic_search": "search_copernicus_images(geometry=[-122.4194, 37.7749], geometry_type='point', mission='sentinel-2', start_date='2024-01-01', end_date='2024-01-31')",
+    "download_quicklook": "download_image(image_id='01234567-89ab-cdef-0123-456789abcdef', mission='sentinel-2', download_type='quicklook')",
+    "batch_download": "batch_download_images(image_ids=['id1', 'id2', 'id3'], mission='sentinel-2', max_concurrent=3)",
+    "file_management": "list_downloaded_files(download_dir='downloads', file_type='quicklook', limit=10)",
+    "search_and_download_workflow": "search_and_download(geometry=[-122.4194, 37.7749], mission='sentinel-2', start_date='2024-01-01', end_date='2024-01-31', download_type='quicklook')"
+  },
+  "configuration": {
+    "default_download_directory": "downloads",
+    "default_batch_directory": "batch_downloads",
+    "max_concurrent_downloads": 3,
+    "timeout_seconds": 60,
+    "supported_missions": [
+      "sentinel-1",
+      "sentinel-2",
+      "sentinel-3",
+      "sentinel-5p",
+      "sentinel-6"
+    ],
+    "supported_download_types": ["full", "quicklook", "compressed"],
+    "supported_geometry_types": ["point", "bbox", "polygon"]
+  },
+  "notes": {
+    "performance": "Full product downloads can be several GBs. Quicklook downloads are recommended for initial testing.",
+    "authentication": "Credentials are required for download operations. Set environment variables before starting the server.",
+    "api_limits": "Respect Copernicus Data Space API rate limits. Use appropriate date ranges and geographic extents.",
+    "file_management": "Regular cleanup is recommended to manage disk space. Use cleanup_downloads with dry_run=True first."
+  }
+}
