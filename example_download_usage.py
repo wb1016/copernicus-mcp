@@ -36,7 +36,7 @@ try:
         get_product_download_links,
         list_downloaded_files,
         search_and_download,
-        search_copernicus_images,
+        search_copernicus,
     )
 except ImportError as e:
     print(f"Error importing server modules: {e}")
@@ -56,7 +56,7 @@ class DownloadExamples:
             self.has_credentials = True
             print("✓ Copernicus credentials found")
         else:
-            print("⚠ No Copernicus credentials found")
+            print("Warning: No Copernicus credentials found")
             print("  Set environment variables:")
             print("    export COPERNICUS_USERNAME='your-email@example.com'")
             print("    export COPERNICUS_PASSWORD='your-password'")
@@ -245,14 +245,14 @@ class DownloadExamples:
 
         # Step 1: Search for images
         print("\nStep 1: Searching for Sentinel-2 images...")
-        search_result = await search_copernicus_images(
+        search_result = await search_copernicus(
             geometry=[-122.4194, 37.7749],  # San Francisco
             geometry_type="point",
             mission="sentinel-2",
             start_date="2024-01-01",
             end_date="2024-01-07",  # One week
             max_cloud_cover=20,
-            limit=3,
+            max_results=3,
         )
 
         if "error" in search_result:
@@ -339,7 +339,7 @@ class DownloadExamples:
         print("EXAMPLES COMPLETE")
         print("=" * 60)
         print("\nNext steps:")
-        print("1. Get real image IDs using search_copernicus_images")
+        print("1. Get real image IDs using search_copernicus")
         print("2. Test with your own coordinates and date ranges")
         print("3. Adjust download_type based on your needs:")
         print("   - 'quicklook' for previews (fast, small files)")

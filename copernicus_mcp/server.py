@@ -32,6 +32,7 @@ import os
 import time
 from datetime import datetime, timedelta
 from enum import Enum
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Sequence, Union
 
 import httpx
@@ -1285,11 +1286,32 @@ async def download_image(
     Returns:
         Dictionary with download status and file information
     """
+    return await _download_image_helper(image_id, mission, download_type, output_dir)
+
+
+async def _download_image_helper(
+    image_id: str,
+    mission: str = "sentinel-2",
+    download_type: str = "full",
+    output_dir: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Helper function to download a Copernicus satellite image.
+
+    Args:
+        image_id: The ID of the image to download (from search results)
+        mission: Mission name (e.g., 'sentinel-2', 'sentinel-1')
+        download_type: Type of download - 'full', 'quicklook', or 'compressed'
+        output_dir: Optional output directory (default: 'downloads')
+
+    Returns:
+        Dictionary with download status and file information
+    """
     import os
     import time
     from pathlib import Path
 
-    import requests
+    import httpx
 
     # Check for authentication
     username = os.environ.get("COPERNICUS_USERNAME")
@@ -1367,7 +1389,7 @@ async def _download_full_product(
     """Download full satellite image product"""
     import os
 
-    import requests
+    import httpx
 
     # Try different download endpoints
     download_urls = [
@@ -1382,36 +1404,40 @@ async def _download_full_product(
         "Accept": "application/octet-stream",
     }
 
+    timeout = httpx.Timeout(
+        300.0, connect=30.0
+    )  # 5 minutes for download, 30 seconds for connect
+
     for url in download_urls:
         try:
-            response = requests.get(url, headers=headers, stream=True, timeout=60)
+            async with httpx.AsyncClient(timeout=timeout) as client:
+                async with client.stream("GET", url, headers=headers) as response:
+                    if response.status_code == 200:
+                        total_size = int(response.headers.get("content-length", 0))
 
-            if response.status_code == 200:
-                total_size = int(response.headers.get("content-length", 0))
+                        # Download the file
+                        downloaded = 0
+                        with open(output_path, "wb") as f:
+                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                                if chunk:
+                                    f.write(chunk)
+                                    downloaded += len(chunk)
 
-                # Download the file
-                downloaded = 0
-                with open(output_path, "wb") as f:
-                    for chunk in response.iter_content(chunk_size=8192):
-                        if chunk:
-                            f.write(chunk)
-                            downloaded += len(chunk)
+                        # Verify download
+                        if output_path.exists():
+                            file_size = output_path.stat().st_size
 
-                # Verify download
-                if output_path.exists():
-                    file_size = output_path.stat().st_size
-
-                    return {
-                        "success": True,
-                        "download_type": "full",
-                        "product_id": product_id,
-                        "filename": output_path.name,
-                        "filepath": str(output_path),
-                        "file_size_bytes": file_size,
-                        "file_size_mb": file_size / (1024 * 1024),
-                        "download_url": url,
-                        "message": f"Successfully downloaded full product ({file_size / (1024 * 1024):.1f} MB)",
-                    }
+                            return {
+                                "success": True,
+                                "download_type": "full",
+                                "product_id": product_id,
+                                "filename": output_path.name,
+                                "filepath": str(output_path),
+                                "file_size_bytes": file_size,
+                                "file_size_mb": file_size / (1024 * 1024),
+                                "download_url": url,
+                                "message": f"Successfully downloaded full product ({file_size / (1024 * 1024):.1f} MB)",
+                            }
 
         except Exception as e:
             continue
@@ -1428,7 +1454,7 @@ async def _download_quicklook(
     product_id: str, filename: str, download_dir: Path, access_token: str
 ) -> Dict[str, Any]:
     """Download quicklook/preview image"""
-    import requests
+    import httpx
 
     # First get product details to find quicklook asset
     product_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({product_id})?$expand=Assets"
@@ -1438,76 +1464,83 @@ async def _download_quicklook(
         "Accept": "application/json",
     }
 
+    timeout = httpx.Timeout(
+        60.0, connect=10.0
+    )  # 1 minute for download, 10 seconds for connect
+
     try:
-        response = requests.get(product_url, headers=headers, timeout=30)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            response = await client.get(product_url, headers=headers)
+            response.raise_for_status()
 
-        product_data = response.json()
-        assets = product_data.get("Assets", [])
+            product_data = response.json()
+            assets = product_data.get("Assets", [])
 
-        # Find quicklook assets
-        quicklook_assets = [
-            asset
-            for asset in assets
-            if asset.get("ContentType") == "image/jpeg"
-            or "quicklook" in asset.get("Name", "").lower()
-            or "preview" in asset.get("Name", "").lower()
-        ]
+            # Find quicklook assets
+            quicklook_assets = [
+                asset
+                for asset in assets
+                if asset.get("ContentType") == "image/jpeg"
+                or "quicklook" in asset.get("Name", "").lower()
+                or "preview" in asset.get("Name", "").lower()
+            ]
 
-        if not quicklook_assets:
-            return {
-                "error": "Quicklook not available",
-                "message": "No quicklook/preview assets found for this product",
-                "product_id": product_id,
+            if not quicklook_assets:
+                return {
+                    "error": "Quicklook not available",
+                    "message": "No quicklook/preview assets found for this product",
+                    "product_id": product_id,
+                }
+
+            # Use first quicklook asset
+            quicklook_id = quicklook_assets[0].get("Id")
+            if not quicklook_id:
+                return {
+                    "error": "Quicklook ID not found",
+                    "message": "Quicklook asset has no ID",
+                    "product_id": product_id,
+                }
+
+            # Download quicklook
+            quicklook_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Assets({quicklook_id})/$value"
+            output_path = download_dir / f"{filename}_quicklook.jpg"
+
+            headers = {
+                "Authorization": f"Bearer {access_token}",
+                "Accept": "image/jpeg",
             }
 
-        # Use first quicklook asset
-        quicklook_id = quicklook_assets[0].get("Id")
-        if not quicklook_id:
-            return {
-                "error": "Quicklook ID not found",
-                "message": "Quicklook asset has no ID",
-                "product_id": product_id,
-            }
+            async with client.stream(
+                "GET", quicklook_url, headers=headers
+            ) as stream_response:
+                stream_response.raise_for_status()
 
-        # Download quicklook
-        quicklook_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Assets({quicklook_id})/$value"
-        output_path = download_dir / f"{filename}_quicklook.jpg"
+                with open(output_path, "wb") as f:
+                    async for chunk in stream_response.aiter_bytes(chunk_size=8192):
+                        if chunk:
+                            f.write(chunk)
 
-        headers = {
-            "Authorization": f"Bearer {access_token}",
-            "Accept": "image/jpeg",
-        }
+            if output_path.exists():
+                file_size = output_path.stat().st_size
 
-        response = requests.get(quicklook_url, headers=headers, stream=True, timeout=30)
-        response.raise_for_status()
-
-        with open(output_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
-
-        if output_path.exists():
-            file_size = output_path.stat().st_size
-
-            return {
-                "success": True,
-                "download_type": "quicklook",
-                "product_id": product_id,
-                "quicklook_id": quicklook_id,
-                "filename": output_path.name,
-                "filepath": str(output_path),
-                "file_size_bytes": file_size,
-                "file_size_kb": file_size / 1024,
-                "download_url": quicklook_url,
-                "message": f"Successfully downloaded quicklook ({file_size / 1024:.1f} KB)",
-            }
-        else:
-            return {
-                "error": "Quicklook download failed",
-                "message": "File was not created",
-                "product_id": product_id,
-            }
+                return {
+                    "success": True,
+                    "download_type": "quicklook",
+                    "product_id": product_id,
+                    "quicklook_id": quicklook_id,
+                    "filename": output_path.name,
+                    "filepath": str(output_path),
+                    "file_size_bytes": file_size,
+                    "file_size_kb": file_size / 1024,
+                    "download_url": quicklook_url,
+                    "message": f"Successfully downloaded quicklook ({file_size / 1024:.1f} KB)",
+                }
+            else:
+                return {
+                    "error": "Quicklook download failed",
+                    "message": "File was not created",
+                    "product_id": product_id,
+                }
 
     except Exception as e:
         return {
@@ -1520,46 +1553,62 @@ async def _download_quicklook(
 async def _download_compressed(
     product_id: str, filename: str, download_dir: Path, access_token: str
 ) -> Dict[str, Any]:
-    """Download compressed satellite image product"""
-    import requests
+    """Download compressed version of satellite image"""
+    import httpx
 
-    download_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({product_id})/$zip"
+    # For compressed downloads, we'll use a different endpoint
+    # Note: This might not be available for all products
+    compressed_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({product_id})/Compressed/$value"
+
     output_path = download_dir / f"{filename}_compressed.zip"
 
     headers = {
         "Authorization": f"Bearer {access_token}",
-        "Accept": "application/zip",
+        "Accept": "application/octet-stream",
     }
 
+    timeout = httpx.Timeout(
+        300.0, connect=30.0
+    )  # 5 minutes for download, 30 seconds for connect
+
     try:
-        response = requests.get(download_url, headers=headers, stream=True, timeout=60)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            async with client.stream(
+                "GET", compressed_url, headers=headers
+            ) as response:
+                if response.status_code == 200:
+                    with open(output_path, "wb") as f:
+                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                            if chunk:
+                                f.write(chunk)
 
-        with open(output_path, "wb") as f:
-            for chunk in response.iter_content(chunk_size=8192):
-                if chunk:
-                    f.write(chunk)
+                    if output_path.exists():
+                        file_size = output_path.stat().st_size
 
-        if output_path.exists():
-            file_size = output_path.stat().st_size
+                        return {
+                            "success": True,
+                            "download_type": "compressed",
+                            "product_id": product_id,
+                            "filename": output_path.name,
+                            "filepath": str(output_path),
+                            "file_size_bytes": file_size,
+                            "file_size_mb": file_size / (1024 * 1024),
+                            "download_url": compressed_url,
+                            "message": f"Successfully downloaded compressed product ({file_size / (1024 * 1024):.1f} MB)",
+                        }
+                else:
+                    return {
+                        "error": "Compressed download failed",
+                        "message": f"HTTP {response.status_code}: {response.reason_phrase}",
+                        "product_id": product_id,
+                        "url": compressed_url,
+                    }
 
-            return {
-                "success": True,
-                "download_type": "compressed",
-                "product_id": product_id,
-                "filename": output_path.name,
-                "filepath": str(output_path),
-                "file_size_bytes": file_size,
-                "file_size_mb": file_size / (1024 * 1024),
-                "download_url": download_url,
-                "message": f"Successfully downloaded compressed product ({file_size / (1024 * 1024):.1f} MB)",
-            }
-        else:
-            return {
-                "error": "Compressed download failed",
-                "message": "File was not created",
-                "product_id": product_id,
-            }
+        # If we get here, the compressed download endpoint didn't work
+        # Try the regular download endpoint as fallback
+        return await _download_full_product(
+            product_id, filename, download_dir, access_token
+        )
 
     except Exception as e:
         return {
@@ -1581,20 +1630,20 @@ async def batch_download_images(
     max_concurrent: int = 3,
 ) -> Dict[str, Any]:
     """
-    Download multiple Copernicus satellite images.
+    Download multiple Copernicus satellite images concurrently.
 
     Args:
         image_ids: List of image IDs to download
         mission: Mission name (e.g., 'sentinel-2', 'sentinel-1')
-        download_type: Type of download - 'full', 'quicklook', or 'compressed'
         output_dir: Optional output directory (default: 'downloads')
-        max_concurrent: Maximum concurrent downloads
+        max_concurrent: Maximum number of concurrent downloads
 
     Returns:
         Dictionary with batch download results
     """
     import asyncio
-    from typing import List
+    import os
+    from pathlib import Path
 
     # Check for authentication
     username = os.environ.get("COPERNICUS_USERNAME")
@@ -1711,7 +1760,7 @@ async def check_download_availability(
     Returns:
         Dictionary with availability status for each image
     """
-    import requests
+    import httpx
 
     # Check for authentication
     username = os.environ.get("COPERNICUS_USERNAME")
@@ -1746,7 +1795,8 @@ async def check_download_availability(
         try:
             # Check product details
             product_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})?$expand=Assets"
-            response = requests.get(product_url, headers=headers, timeout=30)
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.get(product_url, headers=headers)
 
             if response.status_code == 200:
                 product_data = response.json()
@@ -1830,7 +1880,7 @@ async def get_product_download_links(
     Returns:
         Dictionary with all available download links and metadata
     """
-    import requests
+    import httpx
 
     # Check for authentication
     username = os.environ.get("COPERNICUS_USERNAME")
@@ -1862,22 +1912,23 @@ async def get_product_download_links(
     try:
         # Get product details with assets
         product_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})?$expand=Assets"
-        response = requests.get(product_url, headers=headers, timeout=30)
-        response.raise_for_status()
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.get(product_url, headers=headers)
+            response.raise_for_status()
 
-        product_data = response.json()
+            product_data = response.json()
 
-        # Extract download links
-        download_links = {
-            "full_product": [
-                f"https://download.dataspace.copernicus.eu/odata/v1/Products({image_id})/$value",
-                f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})/$value",
-            ],
-            "compressed": [
-                f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})/$zip",
-            ],
-            "quicklooks": [],
-        }
+            # Extract download links
+            download_links = {
+                "full_product": [
+                    f"https://download.dataspace.copernicus.eu/odata/v1/Products({image_id})/$value",
+                    f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})/$value",
+                ],
+                "quicklook": [],
+                "compressed": [
+                    f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})/Compressed/$value",
+                ],
+            }
 
         # Find quicklook assets
         assets = product_data.get("Assets", [])
@@ -2328,27 +2379,49 @@ async def search_and_download(
     import time
     from datetime import datetime
 
-    # Step 1: Search for images
-    search_params = {
-        "geometry": geometry,
-        "geometry_type": geometry_type,
-        "mission": mission,
-        "start_date": start_date,
-        "end_date": end_date,
-        "max_cloud_cover": max_cloud_cover,
-        "limit": limit,
-    }
+    # Step 1: Create SearchParameters object
+    # Create MissionParameters
+    mission_params = MissionParameters(
+        mission=mission, processing_level=None, product_type=None, satellite=None
+    )
 
-    search_results = await search_copernicus_images(**search_params)
+    # Create DateRange if dates are provided
+    date_range = None
+    if start_date or end_date:
+        try:
+            start_dt = datetime.fromisoformat(start_date) if start_date else None
+            end_dt = datetime.fromisoformat(end_date) if end_date else None
+            date_range = DateRange(start=start_dt, end=end_dt)
+        except ValueError:
+            # If date parsing fails, continue without date filter
+            pass
 
-    if "error" in search_results:
+    # Create CloudCoverFilter if max_cloud_cover is provided
+    cloud_cover_filter = None
+    if max_cloud_cover is not None:
+        cloud_cover_filter = CloudCoverFilter(max=max_cloud_cover)
+
+    # Create SearchParameters
+    search_params = SearchParameters(
+        geometry=geometry,
+        geometry_type=GeometryType(geometry_type),
+        mission_params=mission_params,
+        date_range=date_range,
+        cloud_cover=cloud_cover_filter,
+        max_results=limit,
+    )
+
+    try:
+        # Get the actual function from the module
+        search_results = await search_copernicus_images(search_params)
+    except Exception as e:
         return {
             "error": "Search failed",
-            "search_error": search_results["error"],
+            "search_error": str(e),
             "message": "Failed to search for images",
         }
 
-    products = search_results.get("products", [])
+    products = search_results.images
     if not products:
         return {
             "error": "No images found",
@@ -2365,24 +2438,22 @@ async def search_and_download(
         score = 0
 
         # Prefer recent images
-        content_date = product.get("ContentDate", {})
-        start_time = content_date.get("Start")
-        if start_time:
+        acquisition_date = product.acquisition_date
+        if acquisition_date:
             try:
-                # Parse date and give higher score to more recent images
-                date_obj = datetime.fromisoformat(start_time.replace("Z", "+00:00"))
-                days_ago = (datetime.now() - date_obj).days
+                # Give higher score to more recent images
+                days_ago = (datetime.now() - acquisition_date).days
                 score += max(0, 30 - days_ago)  # Higher score for images within 30 days
             except:
                 pass
 
         # Prefer low cloud cover
-        cloud_cover = product.get("CloudCover")
+        cloud_cover = product.cloud_cover_percentage
         if cloud_cover is not None:
             score += (100 - cloud_cover) * 0.5  # Higher score for lower cloud cover
 
         # Prefer higher processing level
-        processing_level = product.get("ProcessingLevel", "")
+        processing_level = product.processing_level
         if "L2A" in processing_level:
             score += 20
         elif "L1C" in processing_level:
@@ -2400,7 +2471,7 @@ async def search_and_download(
         }
 
     # Step 3: Download the selected image
-    image_id = best_product.get("Id")
+    image_id = best_product.id
     if not image_id:
         return {
             "error": "No image ID found",
@@ -2408,7 +2479,7 @@ async def search_and_download(
             "message": "Selected product has no ID",
         }
 
-    download_result = await download_image(
+    download_result = await _download_image_helper(
         image_id=image_id,
         mission=mission,
         download_type=download_type,
@@ -2418,18 +2489,18 @@ async def search_and_download(
     return {
         "search_summary": {
             "total_results": len(products),
-            "search_params": search_params,
+            "search_params": search_params.model_dump(),
             "selected_image_id": image_id,
             "selection_score": best_score,
         },
         "selected_image": {
             "id": image_id,
-            "name": best_product.get("Name", "Unknown"),
-            "content_date": best_product.get("ContentDate", {}),
-            "cloud_cover": best_product.get("CloudCover"),
-            "processing_level": best_product.get("ProcessingLevel"),
-            "platform": best_product.get("Platform"),
-            "footprint": best_product.get("Footprint"),
+            "title": best_product.title,
+            "acquisition_date": best_product.acquisition_date,
+            "cloud_cover_percentage": best_product.cloud_cover_percentage,
+            "processing_level": best_product.processing_level,
+            "platform": best_product.platform,
+            "mission": best_product.mission,
         },
         "download_result": download_result,
     }
