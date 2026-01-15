@@ -637,24 +637,6 @@ python -m copernicus_mcp
 - Test scripts for different scenarios
 - Configuration examples in `mcp_config.json`
 
-## 🚀 Roadmap
-
-### Planned Features
-- **Advanced filtering**: More granular search parameters
-- **Visualization tools**: Image preview and analysis
-- **Batch processing**: Automated workflows for large datasets
-- **Integration plugins**: Support for GIS software and data analysis tools
-
-### Performance Improvements
-- **Caching layer**: Reduce API calls for repeated searches
-- **Parallel processing**: Optimize batch operations
-- **Progress reporting**: Enhanced download status updates
-
-### Community Features
-- **Template workflows**: Pre-configured analysis pipelines
-- **Plugin system**: Extensible architecture for custom tools
-- **Collaboration tools**: Shared datasets and analysis results
-
 ---
 
 **Note**: This server is actively maintained. For the latest updates, check the GitHub repository and release notes.
