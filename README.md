@@ -17,8 +17,6 @@ A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Ear
 - [Performance Considerations](#-performance-considerations)
 - [Security Notes](#-security-notes)
 - [Troubleshooting](#-troubleshooting)
-- [Contributing](#-contributing)
-- [License](#-license)
 - [Acknowledgments](#-acknowledgments)
 
 ## 🌟 Features
