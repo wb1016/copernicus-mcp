@@ -29,6 +29,7 @@ __version__ = "0.1.0"
 import asyncio
 import json
 import os
+import sys
 import time
 from datetime import datetime, timedelta
 from enum import Enum
@@ -122,7 +123,7 @@ COPERNICUS_PASSWORD = os.environ.get("COPERNICUS_PASSWORD", "")
 # API Limits
 MAX_DATE_RANGE_DAYS = 90  # Maximum date range to prevent timeouts
 DEFAULT_DATE_RANGE_DAYS = 30  # Default date range if not specified
-API_TIMEOUT = 10.0  # seconds - reduced for faster response
+API_TIMEOUT = 60.0  # seconds - increased for large search results
 MAX_RESULTS_PER_REQUEST = 50  # OData API limit
 
 # Debug flag for authentication
@@ -175,7 +176,7 @@ class MissionParameters(BaseModel):
 class SearchParameters(BaseModel):
     """Search parameters for Copernicus API"""
 
-    geometry: Union[Sequence[Sequence[float]], Dict[str, Any], Sequence[float]]
+    geometry: Any
     geometry_type: GeometryType
     mission_params: MissionParameters
     date_range: Optional[DateRange] = None
@@ -243,18 +244,66 @@ def create_bbox_from_point(lat: float, lon: float, size_km: float = 1.0):
 
 def validate_geometry(geometry, geometry_type: GeometryType):
     """Validate and normalize geometry"""
+    # First, try to parse the geometry as JSON string if it's a string
+    if isinstance(geometry, str):
+        try:
+            geometry = json.loads(geometry)
+        except json.JSONDecodeError:
+            raise ValueError("Geometry string must be valid JSON")
+
     if geometry_type == GeometryType.POINT:
         if isinstance(geometry, list) and len(geometry) == 2:
+            # Check if both elements are numbers
+            if not all(isinstance(coord, (int, float)) for coord in geometry):
+                raise ValueError("Point coordinates must be numbers")
+
+            # Validate coordinate ranges
+            lon, lat = geometry[0], geometry[1]
+            if not (-180 <= lon <= 180):
+                raise ValueError(f"Longitude must be between -180 and 180, got {lon}")
+            if not (-90 <= lat <= 90):
+                raise ValueError(f"Latitude must be between -90 and 90, got {lat}")
+
             # Convert point to bbox
-            lat, lon = geometry[1], geometry[0]
             return create_bbox_from_point(lat, lon)
         else:
             raise ValueError("Point geometry must be [lon, lat]")
 
     elif geometry_type == GeometryType.BBOX:
         if isinstance(geometry, list) and len(geometry) == 4:
-            # Convert bbox coordinates to polygon
+            # Check if all elements are numbers
+            if not all(isinstance(coord, (int, float)) for coord in geometry):
+                raise ValueError("Bounding box coordinates must be numbers")
+
+            # Validate coordinate ranges
             min_lon, min_lat, max_lon, max_lat = geometry
+            if not (-180 <= min_lon <= 180):
+                raise ValueError(
+                    f"Min longitude must be between -180 and 180, got {min_lon}"
+                )
+            if not (-90 <= min_lat <= 90):
+                raise ValueError(
+                    f"Min latitude must be between -90 and 90, got {min_lat}"
+                )
+            if not (-180 <= max_lon <= 180):
+                raise ValueError(
+                    f"Max longitude must be between -180 and 180, got {max_lon}"
+                )
+            if not (-90 <= max_lat <= 90):
+                raise ValueError(
+                    f"Max latitude must be between -90 and 90, got {max_lat}"
+                )
+
+            if min_lon >= max_lon:
+                raise ValueError(
+                    f"Min longitude ({min_lon}) must be less than max longitude ({max_lon})"
+                )
+            if min_lat >= max_lat:
+                raise ValueError(
+                    f"Min latitude ({min_lat}) must be less than max latitude ({max_lat})"
+                )
+
+            # Convert bbox coordinates to polygon
             return [
                 [min_lon, min_lat],
                 [max_lon, min_lat],
@@ -269,14 +318,80 @@ def validate_geometry(geometry, geometry_type: GeometryType):
 
     elif geometry_type == GeometryType.POLYGON:
         if isinstance(geometry, list):
-            # Check if it's a valid polygon
-            if len(geometry) < 3:
-                raise ValueError("Polygon must have at least 3 points")
-            # Check if first and last points are the same (closed polygon)
-            if geometry[0] != geometry[-1]:
-                # Close the polygon
-                geometry = geometry + [geometry[0]]
-            return geometry
+            # Handle nested coordinate lists (GeoJSON format)
+            if geometry and isinstance(geometry[0], list):
+                # Check if it's a list of coordinate pairs
+                if geometry[0] and isinstance(geometry[0][0], (int, float)):
+                    # This is a simple polygon: [[lon, lat], [lon, lat], ...]
+                    # Validate all coordinates are numbers and within valid ranges
+                    for i, coord_pair in enumerate(geometry):
+                        if not (
+                            isinstance(coord_pair, list)
+                            and len(coord_pair) == 2
+                            and all(
+                                isinstance(coord, (int, float)) for coord in coord_pair
+                            )
+                        ):
+                            raise ValueError(
+                                f"Invalid coordinate pair at position {i}: {coord_pair}"
+                            )
+
+                        lon, lat = coord_pair[0], coord_pair[1]
+                        if not (-180 <= lon <= 180):
+                            raise ValueError(
+                                f"Longitude at position {i} must be between -180 and 180, got {lon}"
+                            )
+                        if not (-90 <= lat <= 90):
+                            raise ValueError(
+                                f"Latitude at position {i} must be between -90 and 90, got {lat}"
+                            )
+
+                    if len(geometry) < 3:
+                        raise ValueError("Polygon must have at least 3 points")
+                    # Check if first and last points are the same (closed polygon)
+                    if geometry[0] != geometry[-1]:
+                        # Close the polygon
+                        geometry = geometry + [geometry[0]]
+                    return geometry
+                else:
+                    # This is a nested polygon: [[[lon, lat], [lon, lat], ...]]
+                    # Extract the first ring (outer boundary)
+                    polygon_ring = geometry[0]
+                    if not polygon_ring:
+                        raise ValueError("Polygon ring cannot be empty")
+
+                    # Validate all coordinates are numbers and within valid ranges
+                    for i, coord_pair in enumerate(polygon_ring):
+                        if not (
+                            isinstance(coord_pair, list)
+                            and len(coord_pair) == 2
+                            and all(
+                                isinstance(coord, (int, float)) for coord in coord_pair
+                            )
+                        ):
+                            raise ValueError(
+                                f"Invalid coordinate pair at position {i}: {coord_pair}"
+                            )
+
+                        lon, lat = coord_pair[0], coord_pair[1]
+                        if not (-180 <= lon <= 180):
+                            raise ValueError(
+                                f"Longitude at position {i} must be between -180 and 180, got {lon}"
+                            )
+                        if not (-90 <= lat <= 90):
+                            raise ValueError(
+                                f"Latitude at position {i} must be between -90 and 90, got {lat}"
+                            )
+
+                    if len(polygon_ring) < 3:
+                        raise ValueError("Polygon must have at least 3 points")
+                    # Check if first and last points are the same (closed polygon)
+                    if polygon_ring[0] != polygon_ring[-1]:
+                        # Close the polygon
+                        polygon_ring = polygon_ring + [polygon_ring[0]]
+                    return polygon_ring
+            else:
+                raise ValueError("Polygon must be a list of coordinate pairs")
         elif isinstance(geometry, dict) and geometry.get("type") == "Polygon":
             # GeoJSON polygon
             coordinates = geometry.get("coordinates", [])
@@ -391,10 +506,78 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
         filter_parts.append(f"ContentDate/Start ge {start_str}")
         filter_parts.append(f"ContentDate/Start le {end_str}")
 
+    # Add spatial filter using geo.intersects
+    # Convert geometry to WKT (Well-Known Text) format for OData
+    try:
+        if geometry and len(geometry) > 0:
+            wkt_geometry = ""
+
+            # Handle different geometry types
+            if params.geometry_type == GeometryType.POLYGON:
+                # Create WKT polygon string
+                # OData expects coordinates in [lon lat] order (no comma between coordinates)
+                wkt_coords = []
+                for coord in geometry:
+                    if len(coord) == 2:
+                        lon, lat = coord[0], coord[1]
+                        wkt_coords.append(f"{lon} {lat}")
+
+                if wkt_coords:
+                    # Close the polygon if not already closed
+                    if wkt_coords[0] != wkt_coords[-1]:
+                        wkt_coords.append(wkt_coords[0])
+
+                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+
+            elif params.geometry_type == GeometryType.BBOX:
+                # For bbox, create polygon from bbox coordinates
+                # geometry is already a polygon from validate_geometry
+                wkt_coords = []
+                for coord in geometry:
+                    if len(coord) == 2:
+                        lon, lat = coord[0], coord[1]
+                        wkt_coords.append(f"{lon} {lat}")
+
+                if wkt_coords:
+                    # Close the polygon if not already closed
+                    if wkt_coords[0] != wkt_coords[-1]:
+                        wkt_coords.append(wkt_coords[0])
+
+                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+
+            elif params.geometry_type == GeometryType.POINT:
+                # For point, create a small buffer around the point
+                # geometry is a polygon (bbox) from validate_geometry
+                wkt_coords = []
+                for coord in geometry:
+                    if len(coord) == 2:
+                        lon, lat = coord[0], coord[1]
+                        wkt_coords.append(f"{lon} {lat}")
+
+                if wkt_coords:
+                    # Close the polygon if not already closed
+                    if wkt_coords[0] != wkt_coords[-1]:
+                        wkt_coords.append(wkt_coords[0])
+
+                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+
+            if wkt_geometry:
+                spatial_filter = f"geo.intersects(Footprint, geography'{wkt_geometry}')"
+                filter_parts.append(spatial_filter)
+                print(
+                    f"Debug: Added spatial filter: {spatial_filter[:100]}...",
+                    file=sys.stderr,
+                )
+
+    except Exception as e:
+        # If spatial filter fails, continue without it (better than failing completely)
+        print(f"Warning: Could not create spatial filter: {e}", file=sys.stderr)
+
     odata_params = {
         "$top": min(params.max_results, MAX_RESULTS_PER_REQUEST),
         "$orderby": "ContentDate/Start desc",
         "$filter": " and ".join(filter_parts),
+        "$count": "true",  # Get total count
     }
 
     api_url = f"{COPERNICUS_NEW_API_BASE}/Products"
@@ -420,9 +603,18 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
 
     async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
         try:
+            print(f"Debug: API URL: {api_url}", file=sys.stderr)
+            print(
+                f"Debug: OData filter: {odata_params.get('$filter', 'No filter')}",
+                file=sys.stderr,
+            )
             response = await client.get(api_url, params=odata_params, headers=headers)
             response.raise_for_status()
             data = response.json()
+            print(
+                f"Debug: API response count: {data.get('@odata.count', 'Unknown')}",
+                file=sys.stderr,
+            )
         except Exception as e:
             raise Exception(f"API request failed: {str(e)}")
 
@@ -577,9 +769,9 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
     description="Search for Copernicus satellite images for a given region",
 )
 async def search_copernicus(
-    geometry: Union[Sequence[Sequence[float]], Dict[str, Any], Sequence[float]] = Field(
+    geometry: Any = Field(
         ...,
-        description="Geometry as GeoJSON polygon coordinates [[lon, lat], ...] or point [lon, lat]",
+        description="Geometry as polygon coordinates [[lon, lat], ...] or GeoJSON polygon [[[lon, lat], ...]] or point [lon, lat] or bbox [min_lon, min_lat, max_lon, max_lat]",
     ),
     geometry_type: GeometryType = Field(
         GeometryType.POLYGON,
@@ -951,7 +1143,7 @@ async def get_mission_info(
     description="Get the most recent satellite images for a region",
 )
 async def get_recent_images(
-    geometry: Union[List[float], Dict[str, Any]],
+    geometry: Any,
     geometry_type: GeometryType = GeometryType.POINT,
     mission: str = "sentinel-2",
     days_back: int = 7,
@@ -961,7 +1153,7 @@ async def get_recent_images(
     Get the most recent satellite images for a region.
 
     Args:
-        geometry: GeoJSON polygon coordinates or point [lon, lat]
+        geometry: Geometry as polygon coordinates [[lon, lat], ...] or GeoJSON polygon [[[lon, lat], ...]] or point [lon, lat] or bbox [min_lon, min_lat, max_lon, max_lat]
         geometry_type: Type of geometry: 'point', 'polygon', or 'bbox'
         mission: Mission name: 'sentinel-1', 'sentinel-2', 'sentinel-3', 'sentinel-5p', 'sentinel-6'
         days_back: Number of days to look back from current date (1-365)
@@ -1063,7 +1255,7 @@ async def get_recent_images(
     description="Check satellite image coverage for a region over time",
 )
 async def check_coverage(
-    geometry: Union[List[float], Dict[str, Any]],
+    geometry: Any,
     start_date: str,
     end_date: str,
     geometry_type: GeometryType = GeometryType.POLYGON,
@@ -1074,7 +1266,7 @@ async def check_coverage(
     Check satellite image coverage for a region over time.
 
     Args:
-        geometry: GeoJSON polygon coordinates or point [lon, lat]
+        geometry: Geometry as polygon coordinates [[lon, lat], ...] or GeoJSON polygon [[[lon, lat], ...]] or point [lon, lat] or bbox [min_lon, min_lat, max_lon, max_lat]
         start_date: Start date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
         end_date: End date (YYYY-MM-DD or YYYY-MM-DDTHH:MM:SS)
         geometry_type: Type of geometry: 'point', 'polygon', or 'bbox'
@@ -1266,7 +1458,7 @@ async def check_coverage(
 
 @mcp.tool(
     name="download_image",
-    description="Download a Copernicus satellite image by ID. Requires COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables.",
+    description="Download a Copernicus satellite image by ID. Requires COPERNICUS_USERNAME and COPERNICUS_PASSWORD environment variables. WARNING: Full product downloads can take hours. Use download_type='quicklook' for testing.",
 )
 async def download_image(
     image_id: str,
@@ -1285,6 +1477,12 @@ async def download_image(
 
     Returns:
         Dictionary with download status and file information
+
+    WARNING:
+    - Full product downloads can be several GB and take HOURS to complete
+    - MCP clients may timeout during long downloads
+    - Use download_type='quicklook' for testing (small files, fast downloads)
+    - Progress is reported to stderr every 5 seconds during download
     """
     return await _download_image_helper(image_id, mission, download_type, output_dir)
 
@@ -1306,8 +1504,15 @@ async def _download_image_helper(
 
     Returns:
         Dictionary with download status and file information
+
+    WARNING:
+    - Full product downloads can be several GB and take HOURS to complete
+    - MCP clients may timeout during long downloads
+    - Use download_type='quicklook' for testing (small files, fast downloads)
+    - Progress is reported to stderr every 5 seconds during download
     """
     import os
+    import sys
     import time
     from pathlib import Path
 
@@ -1357,14 +1562,41 @@ async def _download_image_helper(
 
         # Download based on type
         if download_type == "full":
+            print(
+                f"WARNING: Full product download started. This can take HOURS to complete.",
+                file=sys.stderr,
+            )
+            print(
+                f"Progress will be reported every 5 seconds. MCP clients may timeout.",
+                file=sys.stderr,
+            )
+            print(
+                f"For testing, use download_type='quicklook' instead.",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
             return await _download_full_product(
                 image_id, filename, download_dir, access_token
             )
         elif download_type == "quicklook":
+            print(
+                f"Quicklook download started (fast, small file)",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
             return await _download_quicklook(
                 image_id, filename, download_dir, access_token
             )
         elif download_type == "compressed":
+            print(
+                f"Compressed download started. This may take several minutes.",
+                file=sys.stderr,
+            )
+            print(
+                f"Progress will be reported every 5 seconds.",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
             return await _download_compressed(
                 image_id, filename, download_dir, access_token
             )
@@ -1388,6 +1620,8 @@ async def _download_full_product(
 ) -> Dict[str, Any]:
     """Download full satellite image product"""
     import os
+    import sys
+    import time
 
     import httpx
 
@@ -1404,9 +1638,10 @@ async def _download_full_product(
         "Accept": "application/octet-stream",
     }
 
+    # Increase timeout for large downloads - up to 2 hours for very large files
     timeout = httpx.Timeout(
-        300.0, connect=30.0
-    )  # 5 minutes for download, 30 seconds for connect
+        7200.0, connect=60.0, read=7200.0, write=60.0
+    )  # 2 hours for download, 1 minute for connect
 
     for url in download_urls:
         try:
@@ -1415,17 +1650,85 @@ async def _download_full_product(
                     if response.status_code == 200:
                         total_size = int(response.headers.get("content-length", 0))
 
-                        # Download the file
+                        # Log start of download
+                        print(
+                            f"Starting download of product {product_id}",
+                            file=sys.stderr,
+                        )
+                        if total_size > 0:
+                            print(
+                                f"Total size: {total_size / (1024 * 1024 * 1024):.2f} GB ({total_size / (1024 * 1024):.1f} MB)",
+                                file=sys.stderr,
+                            )
+                        print(f"Download URL: {url}", file=sys.stderr)
+                        print(
+                            f"Download started at {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                            file=sys.stderr,
+                        )
+                        print(
+                            f"Progress will be reported every 5 seconds or 50MB",
+                            file=sys.stderr,
+                        )
+                        sys.stderr.flush()
+
+                        # Download the file with progress reporting
                         downloaded = 0
+                        chunk_size = 1024 * 1024  # 1MB chunks for better performance
+                        last_progress_time = time.time()
+                        last_progress_size = 0
+
                         with open(output_path, "wb") as f:
-                            async for chunk in response.aiter_bytes(chunk_size=8192):
+                            async for chunk in response.aiter_bytes(
+                                chunk_size=chunk_size
+                            ):
                                 if chunk:
                                     f.write(chunk)
                                     downloaded += len(chunk)
 
+                                    # Report progress every 5 seconds or every 50MB
+                                    current_time = time.time()
+                                    if (current_time - last_progress_time >= 5) or (
+                                        downloaded - last_progress_size
+                                        >= 50 * 1024 * 1024
+                                    ):
+                                        if total_size > 0:
+                                            percent = (downloaded / total_size) * 100
+                                            print(
+                                                f"Download progress: {downloaded / (1024 * 1024):.1f} MB / {total_size / (1024 * 1024):.1f} MB ({percent:.1f}%)",
+                                                file=sys.stderr,
+                                            )
+                                        else:
+                                            print(
+                                                f"Download progress: {downloaded / (1024 * 1024):.1f} MB downloaded",
+                                                file=sys.stderr,
+                                            )
+                                        sys.stderr.flush()
+                                        last_progress_time = current_time
+                                        last_progress_size = downloaded
+
+                                    # Always flush after each chunk to ensure output
+                                    sys.stderr.flush()
+
+                        # Final progress report
+                        print(
+                            f"Download complete: {downloaded / (1024 * 1024):.1f} MB downloaded",
+                            file=sys.stderr,
+                        )
+                        sys.stderr.flush()
+
                         # Verify download
                         if output_path.exists():
                             file_size = output_path.stat().st_size
+
+                            # Verify file size matches expected if we have total_size
+                            if (
+                                total_size > 0 and abs(file_size - total_size) > 1024
+                            ):  # Allow 1KB difference
+                                print(
+                                    f"Warning: Downloaded file size ({file_size} bytes) differs from expected ({total_size} bytes)",
+                                    file=sys.stderr,
+                                )
+                                sys.stderr.flush()
 
                             return {
                                 "success": True,
@@ -1435,11 +1738,18 @@ async def _download_full_product(
                                 "filepath": str(output_path),
                                 "file_size_bytes": file_size,
                                 "file_size_mb": file_size / (1024 * 1024),
+                                "file_size_gb": file_size / (1024 * 1024 * 1024),
                                 "download_url": url,
                                 "message": f"Successfully downloaded full product ({file_size / (1024 * 1024):.1f} MB)",
                             }
 
+        except httpx.TimeoutException as e:
+            print(f"Timeout during download from {url}: {e}", file=sys.stderr)
+            sys.stderr.flush()
+            continue
         except Exception as e:
+            print(f"Error during download from {url}: {e}", file=sys.stderr)
+            sys.stderr.flush()
             continue
 
     return {
@@ -1454,6 +1764,8 @@ async def _download_quicklook(
     product_id: str, filename: str, download_dir: Path, access_token: str
 ) -> Dict[str, Any]:
     """Download quicklook/preview image"""
+    import sys
+
     import httpx
 
     # First get product details to find quicklook asset
@@ -1465,11 +1777,14 @@ async def _download_quicklook(
     }
 
     timeout = httpx.Timeout(
-        60.0, connect=10.0
-    )  # 1 minute for download, 10 seconds for connect
+        120.0, connect=30.0
+    )  # 2 minutes for download, 30 seconds for connect
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
+            print(f"Fetching product details for {product_id}", file=sys.stderr)
+            sys.stderr.flush()
+
             response = await client.get(product_url, headers=headers)
             response.raise_for_status()
 
@@ -1510,6 +1825,9 @@ async def _download_quicklook(
                 "Accept": "image/jpeg",
             }
 
+            print(f"Downloading quicklook from {quicklook_url}", file=sys.stderr)
+            sys.stderr.flush()
+
             async with client.stream(
                 "GET", quicklook_url, headers=headers
             ) as stream_response:
@@ -1522,6 +1840,11 @@ async def _download_quicklook(
 
             if output_path.exists():
                 file_size = output_path.stat().st_size
+                print(
+                    f"Quicklook download complete: {file_size / 1024:.1f} KB",
+                    file=sys.stderr,
+                )
+                sys.stderr.flush()
 
                 return {
                     "success": True,
@@ -1543,6 +1866,8 @@ async def _download_quicklook(
                 }
 
     except Exception as e:
+        print(f"Error downloading quicklook: {e}", file=sys.stderr)
+        sys.stderr.flush()
         return {
             "error": "Quicklook download failed",
             "exception": str(e),
@@ -1554,6 +1879,10 @@ async def _download_compressed(
     product_id: str, filename: str, download_dir: Path, access_token: str
 ) -> Dict[str, Any]:
     """Download compressed version of satellite image"""
+    import os
+    import sys
+    import time
+
     import httpx
 
     # For compressed downloads, we'll use a different endpoint
@@ -1567,9 +1896,10 @@ async def _download_compressed(
         "Accept": "application/octet-stream",
     }
 
+    # Increase timeout for compressed downloads
     timeout = httpx.Timeout(
-        300.0, connect=30.0
-    )  # 5 minutes for download, 30 seconds for connect
+        3600.0, connect=60.0, read=3600.0, write=60.0
+    )  # 1 hour for download, 1 minute for connect
 
     try:
         async with httpx.AsyncClient(timeout=timeout) as client:
@@ -1577,13 +1907,73 @@ async def _download_compressed(
                 "GET", compressed_url, headers=headers
             ) as response:
                 if response.status_code == 200:
+                    total_size = int(response.headers.get("content-length", 0))
+
+                    # Log start of download
+                    print(
+                        f"Starting compressed download of product {product_id}",
+                        file=sys.stderr,
+                    )
+                    if total_size > 0:
+                        print(
+                            f"Total size: {total_size / (1024 * 1024):.1f} MB",
+                            file=sys.stderr,
+                        )
+                    print(f"Download URL: {compressed_url}", file=sys.stderr)
+                    sys.stderr.flush()
+
+                    # Download the file with progress reporting
+                    downloaded = 0
+                    chunk_size = 1024 * 1024  # 1MB chunks for better performance
+                    last_progress_time = time.time()
+                    last_progress_size = 0
+
                     with open(output_path, "wb") as f:
-                        async for chunk in response.aiter_bytes(chunk_size=8192):
+                        async for chunk in response.aiter_bytes(chunk_size=chunk_size):
                             if chunk:
                                 f.write(chunk)
+                                downloaded += len(chunk)
+
+                                # Report progress every 5 seconds or every 50MB
+                                current_time = time.time()
+                                if (current_time - last_progress_time >= 5) or (
+                                    downloaded - last_progress_size >= 50 * 1024 * 1024
+                                ):
+                                    if total_size > 0:
+                                        percent = (downloaded / total_size) * 100
+                                        print(
+                                            f"Compressed download progress: {downloaded / (1024 * 1024):.1f} MB / {total_size / (1024 * 1024):.1f} MB ({percent:.1f}%)",
+                                            file=sys.stderr,
+                                        )
+                                    else:
+                                        print(
+                                            f"Compressed download progress: {downloaded / (1024 * 1024):.1f} MB downloaded",
+                                            file=sys.stderr,
+                                        )
+                                    sys.stderr.flush()
+                                    last_progress_time = current_time
+                                    last_progress_size = downloaded
+
+                                # Always flush after each chunk to ensure output
+                                sys.stderr.flush()
+
+                    # Final progress report
+                    print(
+                        f"Compressed download complete: {downloaded / (1024 * 1024):.1f} MB downloaded",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
 
                     if output_path.exists():
                         file_size = output_path.stat().st_size
+
+                        # Verify file size matches expected if we have total_size
+                        if total_size > 0 and abs(file_size - total_size) > 1024:
+                            print(
+                                f"Warning: Downloaded compressed file size ({file_size} bytes) differs from expected ({total_size} bytes)",
+                                file=sys.stderr,
+                            )
+                            sys.stderr.flush()
 
                         return {
                             "success": True,
@@ -1597,6 +1987,11 @@ async def _download_compressed(
                             "message": f"Successfully downloaded compressed product ({file_size / (1024 * 1024):.1f} MB)",
                         }
                 else:
+                    print(
+                        f"Compressed download failed: HTTP {response.status_code}: {response.reason_phrase}",
+                        file=sys.stderr,
+                    )
+                    sys.stderr.flush()
                     return {
                         "error": "Compressed download failed",
                         "message": f"HTTP {response.status_code}: {response.reason_phrase}",
@@ -1606,11 +2001,27 @@ async def _download_compressed(
 
         # If we get here, the compressed download endpoint didn't work
         # Try the regular download endpoint as fallback
+        print(
+            f"Compressed endpoint failed, trying regular download as fallback",
+            file=sys.stderr,
+        )
+        sys.stderr.flush()
         return await _download_full_product(
             product_id, filename, download_dir, access_token
         )
 
+    except httpx.TimeoutException as e:
+        print(f"Timeout during compressed download: {e}", file=sys.stderr)
+        sys.stderr.flush()
+        return {
+            "error": "Compressed download timeout",
+            "exception": str(e),
+            "product_id": product_id,
+            "message": "Download timed out. The file may be too large or the connection too slow.",
+        }
     except Exception as e:
+        print(f"Error during compressed download: {e}", file=sys.stderr)
+        sys.stderr.flush()
         return {
             "error": "Compressed download failed",
             "exception": str(e),
@@ -1620,7 +2031,7 @@ async def _download_compressed(
 
 @mcp.tool(
     name="batch_download_images",
-    description="Download multiple Copernicus satellite images by IDs. Requires authentication.",
+    description="Download multiple Copernicus satellite images concurrently. Requires authentication. WARNING: Full product batch downloads can take HOURS. Use download_type='quicklook' for testing.",
 )
 async def batch_download_images(
     image_ids: List[str],
@@ -1640,9 +2051,16 @@ async def batch_download_images(
 
     Returns:
         Dictionary with batch download results
+
+    WARNING:
+    - Full product batch downloads can take HOURS to complete
+    - MCP clients may timeout during long downloads
+    - Use download_type='quicklook' for testing (small files, fast downloads)
+    - Progress is reported to stderr every 5 seconds during each download
     """
     import asyncio
     import os
+    import sys
     from pathlib import Path
 
     # Check for authentication
@@ -1683,26 +2101,70 @@ async def batch_download_images(
 
     async def download_with_semaphore(image_id: str) -> Dict[str, Any]:
         async with semaphore:
-            if download_type == "full":
-                return await _download_full_product(
-                    image_id, f"{mission}_{image_id}", download_dir, access_token
+            print(f"Starting download of image {image_id}", file=sys.stderr)
+            sys.stderr.flush()
+
+            try:
+                if download_type == "full":
+                    return await _download_full_product(
+                        image_id, f"{mission}_{image_id}", download_dir, access_token
+                    )
+                elif download_type == "quicklook":
+                    return await _download_quicklook(
+                        image_id, f"{mission}_{image_id}", download_dir, access_token
+                    )
+                elif download_type == "compressed":
+                    return await _download_compressed(
+                        image_id, f"{mission}_{image_id}", download_dir, access_token
+                    )
+                else:
+                    return {
+                        "error": "Invalid download type",
+                        "image_id": image_id,
+                        "message": f"Unknown download type: {download_type}",
+                    }
+            except Exception as e:
+                print(
+                    f"Error in download_with_semaphore for {image_id}: {e}",
+                    file=sys.stderr,
                 )
-            elif download_type == "quicklook":
-                return await _download_quicklook(
-                    image_id, f"{mission}_{image_id}", download_dir, access_token
-                )
-            elif download_type == "compressed":
-                return await _download_compressed(
-                    image_id, f"{mission}_{image_id}", download_dir, access_token
-                )
-            else:
+                sys.stderr.flush()
                 return {
-                    "error": "Invalid download type",
+                    "error": "Download failed",
+                    "exception": str(e),
                     "image_id": image_id,
-                    "message": f"Unknown download type: {download_type}",
                 }
 
     # Start all downloads
+    print(
+        f"Starting batch download of {len(image_ids)} images with max {max_concurrent} concurrent downloads",
+        file=sys.stderr,
+    )
+    if download_type == "full":
+        print(
+            f"WARNING: Full product batch download. This can take HOURS to complete.",
+            file=sys.stderr,
+        )
+        print(
+            f"MCP clients may timeout. Use download_type='quicklook' for testing.",
+            file=sys.stderr,
+        )
+    elif download_type == "compressed":
+        print(
+            f"Note: Compressed downloads may take several minutes per image.",
+            file=sys.stderr,
+        )
+    else:
+        print(
+            f"Quicklook downloads are fast and suitable for testing.",
+            file=sys.stderr,
+        )
+    print(
+        f"Progress will be reported every 5 seconds during each download.",
+        file=sys.stderr,
+    )
+    sys.stderr.flush()
+
     tasks = [download_with_semaphore(image_id) for image_id in image_ids]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -1715,6 +2177,8 @@ async def batch_download_images(
         image_id = image_ids[i]
 
         if isinstance(result, Exception):
+            print(f"Download failed for {image_id}: {result}", file=sys.stderr)
+            sys.stderr.flush()
             failed.append(
                 {
                     "image_id": image_id,
@@ -1723,10 +2187,28 @@ async def batch_download_images(
                 }
             )
         elif isinstance(result, dict) and result.get("success"):
+            print(
+                f"Download successful for {image_id}: {result.get('message', '')}",
+                file=sys.stderr,
+            )
+            sys.stderr.flush()
             successful.append(result)
             total_size += result.get("file_size_bytes", 0)
         else:
+            print(f"Download failed for {image_id}: {result}", file=sys.stderr)
+            sys.stderr.flush()
             failed.append({"image_id": image_id, "result": result})
+
+    # Final batch summary
+    print(
+        f"Batch download complete: {len(successful)} successful, {len(failed)} failed",
+        file=sys.stderr,
+    )
+    print(
+        f"Total downloaded size: {total_size / (1024 * 1024 * 1024):.2f} GB ({total_size / (1024 * 1024):.1f} MB)",
+        file=sys.stderr,
+    )
+    sys.stderr.flush()
 
     return {
         "batch_summary": {
@@ -1735,6 +2217,7 @@ async def batch_download_images(
             "failed": len(failed),
             "total_size_bytes": total_size,
             "total_size_mb": total_size / (1024 * 1024),
+            "total_size_gb": total_size / (1024 * 1024 * 1024),
             "download_type": download_type,
             "mission": mission,
             "output_dir": str(download_dir),
@@ -1795,7 +2278,7 @@ async def check_download_availability(
         try:
             # Check product details
             product_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})?$expand=Assets"
-            async with httpx.AsyncClient(timeout=30.0) as client:
+            async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.get(product_url, headers=headers)
 
             if response.status_code == 200:
@@ -1912,7 +2395,7 @@ async def get_product_download_links(
     try:
         # Get product details with assets
         product_url = f"https://catalogue.dataspace.copernicus.eu/odata/v1/Products({image_id})?$expand=Assets"
-        async with httpx.AsyncClient(timeout=30.0) as client:
+        async with httpx.AsyncClient(timeout=60.0) as client:
             response = await client.get(product_url, headers=headers)
             response.raise_for_status()
 
@@ -2345,10 +2828,10 @@ async def get_download_statistics(
 
 @mcp.tool(
     name="search_and_download",
-    description="Search for Copernicus satellite images and download the best match",
+    description="Search for Copernicus satellite images and download the best match. WARNING: Full product downloads can take HOURS. Use download_type='quicklook' for testing.",
 )
 async def search_and_download(
-    geometry: Union[List[float], Dict[str, Any]],
+    geometry: Any,
     geometry_type: str = "point",
     mission: str = "sentinel-2",
     start_date: Optional[str] = None,
@@ -2362,8 +2845,7 @@ async def search_and_download(
     Search for Copernicus satellite images and download the best match.
 
     Args:
-        geometry: Geometry as point [lon, lat], bbox [min_lon, min_lat, max_lon, max_lat],
-                 or polygon [[lon, lat], ...]
+        geometry: Geometry as polygon coordinates [[lon, lat], ...] or GeoJSON polygon [[[lon, lat], ...]] or point [lon, lat] or bbox [min_lon, min_lat, max_lon, max_lat]
         geometry_type: Type of geometry - 'point', 'bbox', or 'polygon'
         mission: Mission name (e.g., 'sentinel-2', 'sentinel-1')
         start_date: Start date (YYYY-MM-DD)
@@ -2376,6 +2858,7 @@ async def search_and_download(
     Returns:
         Dictionary with search results and download status
     """
+    import sys
     import time
     from datetime import datetime
 
@@ -2412,9 +2895,17 @@ async def search_and_download(
     )
 
     try:
+        print(f"Searching for {mission} images...", file=sys.stderr)
+        sys.stderr.flush()
+
         # Get the actual function from the module
         search_results = await search_copernicus_images(search_params)
+
+        print(f"Found {len(search_results.images)} images", file=sys.stderr)
+        sys.stderr.flush()
     except Exception as e:
+        print(f"Search failed: {e}", file=sys.stderr)
+        sys.stderr.flush()
         return {
             "error": "Search failed",
             "search_error": str(e),
@@ -2430,6 +2921,9 @@ async def search_and_download(
         }
 
     # Step 2: Select the best image (lowest cloud cover, most recent)
+    print(f"Selecting best image from {len(products)} results...", file=sys.stderr)
+    sys.stderr.flush()
+
     best_product = None
     best_score = float("-inf")
 
@@ -2479,12 +2973,19 @@ async def search_and_download(
             "message": "Selected product has no ID",
         }
 
+    print(f"Downloading selected image: {image_id}", file=sys.stderr)
+    print(f"Download type: {download_type}", file=sys.stderr)
+    sys.stderr.flush()
+
     download_result = await _download_image_helper(
         image_id=image_id,
         mission=mission,
         download_type=download_type,
         output_dir=output_dir,
     )
+
+    print(f"Download completed for image: {image_id}", file=sys.stderr)
+    sys.stderr.flush()
 
     return {
         "search_summary": {

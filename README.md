@@ -1,5 +1,9 @@
 # Copernicus Earth Observation MCP Server
 
+> **⚠️ Important Update**: Timeout issues with large downloads have been fixed! The server now includes progress reporting and extended timeouts for reliable download of large satellite images.
+
+> **🚨 Zed IDE Users**: If you're experiencing timeout issues with full product downloads, please read the [Zed Timeout Fixes](#-zed-timeout-fixes) section below. We recommend using `download_type='quicklook'` for testing with MCP clients.
+
 A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Earth Observation data from the Copernicus Data Space ecosystem. This server provides a complete suite of tools for searching, downloading, and managing satellite imagery from all Copernicus Sentinel missions.
 
 ## 📋 Table of Contents
@@ -17,6 +21,7 @@ A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Ear
 - [Performance Considerations](#-performance-considerations)
 - [Security Notes](#-security-notes)
 - [Troubleshooting](#-troubleshooting)
+- [Zed Timeout Fixes](#-zed-timeout-fixes)
 - [Acknowledgments](#-acknowledgments)
 
 ## 🌟 Features
@@ -58,7 +63,45 @@ A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Ear
 - pip package manager
 - Copernicus Data Space account (free registration required)
 
-### Installation
+## 🚀 Timeout Fixes & Progress Reporting
+
+### **Problem Solved**
+The server previously experienced timeout errors when downloading large satellite images because:
+1. **Insufficient timeouts**: 5-minute limit was too short for GB-sized files
+2. **No progress reporting**: MCP clients couldn't see if downloads were progressing
+3. **Silent failures**: Downloads could fail without clear error messages
+
+### **Solution Implemented**
+✅ **Increased Timeouts**:
+- Full downloads: 5 minutes → 2 hours (7200s)
+- Compressed downloads: 5 minutes → 1 hour (3600s)
+- Quicklook downloads: 1 minute → 2 minutes (120s)
+- API calls: 10 seconds → 60 seconds
+
+✅ **Progress Reporting**:
+- Regular updates every 10 seconds or 100MB
+- All progress sent to `stderr` for MCP client compatibility
+- Automatic buffer flushing to keep connections alive
+
+✅ **Enhanced Error Handling**:
+- Better timeout exception handling
+- File size verification after downloads
+- Graceful fallback between download endpoints
+
+### **For MCP Client Users**
+- Clients will now see regular progress updates during downloads
+- Large downloads (10+ GB) can complete without timeouts
+- Error messages are more descriptive and actionable
+
+### **Testing**
+Run the timeout test suite:
+```bash
+python test_download_timeout.py
+```
+
+See [TIMEOUT_FIXES.md](TIMEOUT_FIXES.md) for complete documentation.
+
+## 📦 Installation
 
 1. **Clone the repository:**
    ```bash
@@ -152,6 +195,8 @@ Add to your MCP client configuration (e.g., Claude Desktop, Zed):
 ```
 
 ## 🛠️ Available Tools
+
+> **Note**: All download tools now include progress reporting and extended timeouts for large files.
 
 ### **Search & Discovery Tools**
 
@@ -531,7 +576,25 @@ The server includes comprehensive error handling for:
 - Date range errors
 - Invalid download types
 
-## 📈 Performance Considerations
+## ⚡ Performance Considerations
+
+### **Download Performance**
+- **Progress Reporting**: Updates every 10 seconds or 100MB
+- **Extended Timeouts**: Up to 2 hours for large downloads
+- **Chunk Size**: 1MB chunks for optimal throughput
+- **Concurrent Downloads**: Configurable (default: 3 concurrent)
+
+### **Timeout Configuration**
+The server now uses appropriate timeouts for different operations:
+- **Small files (quicklooks)**: 2 minutes
+- **Medium files (compressed)**: 1 hour  
+- **Large files (full products)**: 2 hours
+- **API requests**: 1 minute
+
+### **MCP Client Compatibility**
+- All progress sent to `stderr` with regular flushing
+- Clients must monitor `stderr` for progress updates
+- Connection kept alive through periodic output
 
 ### Download Sizes
 - **Quicklooks**: 100KB - 1MB (recommended for testing)
@@ -567,6 +630,33 @@ The server includes comprehensive error handling for:
 - Cleanup operations require explicit confirmation (dry-run mode by default)
 
 ## 🔧 Troubleshooting
+
+### **Timeout Issues**
+If you're still experiencing timeouts:
+
+1. **Check progress output**: Ensure your MCP client is reading from `stderr`
+2. **Increase timeouts**: For very slow connections, you can modify timeouts in `server.py`
+3. **Use quicklooks**: Test with `download_type="quicklook"` first
+4. **Monitor network**: Satellite images are large; expect 10-100 MB/min speeds
+
+### **Common Download Issues**
+- **No progress messages**: Update to latest version with timeout fixes
+- **Partial downloads**: Network interruptions may require retry
+- **Authentication errors**: Verify Copernicus credentials are set correctly
+
+### **Testing Your Setup**
+```bash
+# Test timeout fixes
+python test_download_timeout.py
+
+# Test with example downloads
+python example_download_usage.py
+```
+
+### **Getting Help**
+- Check [TIMEOUT_FIXES.md](TIMEOUT_FIXES.md) for detailed documentation
+- Review error messages in MCP client logs
+- Test with smaller files first to verify connectivity
 
 ### Common Issues and Solutions
 
@@ -609,6 +699,88 @@ python -m copernicus_mcp
 - Check application logs for detailed error messages
 - Monitor download progress in real-time
 - Review cleanup operations before execution
+
+## 🚨 Zed Timeout Fixes
+
+### Issue Description
+Zed IDE (and other MCP clients) expect MCP tools to complete quickly (typically within 30-60 seconds). However, full satellite image downloads can take **hours** to complete. This mismatch causes Zed to kill download processes prematurely.
+
+### Implemented Fixes
+
+#### 1. Extended Timeouts
+- **Configuration**: Increased `timeout_seconds` from 60 to 7200 (2 hours) in `mcp_config.json`
+- **Server Timeouts**: Full downloads now have 2-hour timeouts, compressed downloads 1 hour, quicklooks 2 minutes
+
+#### 2. Enhanced Progress Reporting
+- **Frequency**: Progress reported every **5 seconds** (was 10 seconds)
+- **Threshold**: Progress reported every **50MB** downloaded (was 100MB)
+- **Immediate Feedback**: Download start message with timestamp
+- **Buffer Flushing**: Frequent `sys.stderr.flush()` to ensure immediate output
+
+#### 3. User Warnings
+- **Clear Warnings**: Immediate warning about potential timeouts
+- **Quicklook Recommendation**: Explicit suggestion to use `download_type='quicklook'` for testing
+- **Tool Descriptions**: Updated with timeout warnings
+
+### Recommendations for Zed Users
+
+#### For Testing (ALWAYS RECOMMENDED)
+```python
+# Use quicklook for testing - fast and reliable
+download_image(
+    image_id="your-image-id",
+    mission="sentinel-2",
+    download_type="quicklook",  # ← RECOMMENDED FOR TESTING
+    output_dir="downloads"
+)
+```
+
+#### For Production (With Caution)
+```python
+# Full downloads may still timeout in Zed
+download_image(
+    image_id="your-image-id",
+    mission="sentinel-2", 
+    download_type="full",  # ← MAY TIMEOUT IN ZED
+    output_dir="downloads"
+)
+```
+
+### Monitoring Progress
+- **Check stderr**: Progress messages are sent to `stderr` every 5 seconds
+- **Look for**: "Download progress: X MB / Y MB (Z%)" messages
+- **Buffer Flushing**: Messages are flushed immediately to ensure visibility
+
+### Alternative Workflows
+
+#### Workflow 1: Search + Quicklook + External Download
+```
+Step 1: search_copernicus_images() - Find images (fast)
+Step 2: download_image(..., 'quicklook') - Preview (fast)  
+Step 3: If needed, use external tool (wget/curl) for full download
+```
+
+#### Workflow 2: Configure Zed (If Possible)
+- Check Zed's MCP client configuration
+- Increase timeout for the `copernicus-eo` server
+- Ensure Zed is reading stderr output
+
+### Testing the Fixes
+```bash
+# Simulate download behavior
+python test_simple_timeout.py --duration 30
+
+# Test quicklook simulation
+python test_simple_timeout.py --quicklook --analyze
+```
+
+### Known Limitations
+1. **MCP Protocol**: Designed for quick operations, not hours-long downloads
+2. **Client Timeouts**: Some MCP clients have hard-coded timeouts
+3. **Network Speed**: Large files (10+ GB) will always take significant time
+
+### Detailed Documentation
+See `ZED_TIMEOUT_FIXES_SUMMARY.md` for complete technical details and `TIMEOUT_FIXES.md` for implementation specifics.
 
 ## 🙏 Acknowledgments
 

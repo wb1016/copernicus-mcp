@@ -54,7 +54,7 @@
     "default_download_directory": "downloads",
     "default_batch_directory": "batch_downloads",
     "max_concurrent_downloads": 3,
-    "timeout_seconds": 60,
+    "timeout_seconds": 7200,
     "supported_missions": [
       "sentinel-1",
       "sentinel-2",
