@@ -527,7 +527,7 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
                     if wkt_coords[0] != wkt_coords[-1]:
                         wkt_coords.append(wkt_coords[0])
 
-                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+                    wkt_geometry = f"SRID=4326;POLYGON(({','.join(wkt_coords)}))"
 
             elif params.geometry_type == GeometryType.BBOX:
                 # For bbox, create polygon from bbox coordinates
@@ -543,7 +543,7 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
                     if wkt_coords[0] != wkt_coords[-1]:
                         wkt_coords.append(wkt_coords[0])
 
-                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+                    wkt_geometry = f"SRID=4326;POLYGON(({','.join(wkt_coords)}))"
 
             elif params.geometry_type == GeometryType.POINT:
                 # For point, create a small buffer around the point
@@ -559,10 +559,10 @@ async def search_copernicus_images(params: SearchParameters) -> SearchResult:
                     if wkt_coords[0] != wkt_coords[-1]:
                         wkt_coords.append(wkt_coords[0])
 
-                    wkt_geometry = f"POLYGON(({','.join(wkt_coords)}))"
+                    wkt_geometry = f"SRID=4326;POLYGON(({','.join(wkt_coords)}))"
 
             if wkt_geometry:
-                spatial_filter = f"geo.intersects(Footprint, geography'{wkt_geometry}')"
+                spatial_filter = f"geo.intersects(Footprint,geography'{wkt_geometry}')"
                 filter_parts.append(spatial_filter)
                 print(
                     f"Debug: Added spatial filter: {spatial_filter[:100]}...",
@@ -944,13 +944,22 @@ async def get_image_details(
     try:
         # Get authentication token
         auth_token_response = await get_auth_token()
+        auth_token = None
+        headers = {"Accept": "application/json"}
+
+        # Only add Authorization header if we have a valid token
         if (
             isinstance(auth_token_response, dict)
             and "access_token" in auth_token_response
         ):
             auth_token = auth_token_response["access_token"]
-        else:
-            auth_token = None
+            headers["Authorization"] = f"Bearer {auth_token}"
+        elif isinstance(auth_token_response, dict) and "error" in auth_token_response:
+            # Authentication failed, but we can still try to get basic metadata
+            print(
+                f"Authentication warning: {auth_token_response.get('message', 'No credentials')}",
+                file=sys.stderr,
+            )
 
         # Build API URL for the specific product
         api_url = f"{COPERNICUS_NEW_API_BASE}/Products({image_id})"
@@ -958,10 +967,7 @@ async def get_image_details(
         async with httpx.AsyncClient(timeout=API_TIMEOUT) as client:
             response = await client.get(
                 api_url,
-                headers={
-                    "Accept": "application/json",
-                    "Authorization": f"Bearer {auth_token}",
-                },
+                headers=headers,
             )
 
             if response.status_code != 200:
