@@ -1,52 +1,29 @@
 # Copernicus Earth Observation MCP Server
-
-> **⚠️ Important Update**: Timeout issues with large downloads have been fixed! The server now includes progress reporting and extended timeouts for reliable download of large satellite images.
-
-> **🚨 Zed IDE Users**: If you're experiencing timeout issues with full product downloads, please read the [Zed Timeout Fixes](#-zed-timeout-fixes) section below. We recommend using `download_type='quicklook'` for testing with MCP clients.
-
 A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Earth Observation data from the Copernicus Data Space ecosystem. This server provides a complete suite of tools for searching, downloading, and managing satellite imagery from all Copernicus Sentinel missions.
 
-## 📋 Table of Contents
-- [Features](#-features)
-- [Available Missions](#-available-missions)
-- [Quick Start](#-quick-start)
-- [Running the Server](#-running-the-server)
-- [Available Tools](#-available-tools)
-- [Complete Workflow Example](#-complete-workflow-example)
-- [Configuration](#-configuration)
-- [Testing](#-testing)
-- [Architecture](#-architecture)
-- [Authentication Model](#-authentication-model)
-- [Error Handling](#-error-handling)
-- [Performance Considerations](#-performance-considerations)
-- [Security Notes](#-security-notes)
-- [Troubleshooting](#-troubleshooting)
-- [Zed Timeout Fixes](#-zed-timeout-fixes)
-- [Acknowledgments](#-acknowledgments)
+# 🌟 Features
 
-## 🌟 Features
-
-### **Search & Discovery**
+## **Search & Discovery**
 - **Multi-Mission Support**: Access data from Sentinel-1, Sentinel-2, Sentinel-3, Sentinel-5P, and Sentinel-6 missions
 - **Advanced Search**: Search by location (point, polygon, bounding box), date range, cloud cover, and mission-specific parameters
 - **Coverage Analysis**: Analyze temporal coverage and availability of satellite data for specific regions
 - **Recent Images**: Get the most recent satellite images for monitoring and change detection
 - **Comprehensive Metadata**: Retrieve detailed image metadata including acquisition details, processing levels, and technical specifications
 
-### **Download & Data Management**
+## **Download & Data Management**
 - **Image Download**: Download full products, quicklook previews, and compressed versions of satellite images
 - **Batch Operations**: Download multiple images concurrently with configurable concurrency limits
 - **Intelligent Selection**: Automatic best-image selection based on recency, cloud cover, and processing level
 - **Availability Checking**: Verify download availability and get file size information before downloading
 - **Download Links**: Get all available download URLs for any satellite image
 
-### **File Management**
+## **File Management**
 - **File Listing**: List and analyze downloaded files with filtering by type, size, and date
 - **Statistics**: Get comprehensive statistics about downloaded files (by mission, file type, time period)
 - **Automated Cleanup**: Clean up old or large downloads with age-based and size-based strategies
 - **Dry Run Mode**: Safety-first approach with preview of cleanup actions before execution
 
-## 🛰️ Available Missions
+# 🛰️ Available Missions
 
 | Mission | Type | Primary Applications | Resolution | Revisit Time |
 |---------|------|---------------------|------------|--------------|
@@ -56,52 +33,14 @@ A comprehensive Model Context Protocol (MCP) server for accessing Copernicus Ear
 | **Sentinel-5P** | Atmospheric Monitoring | Air quality, ozone layer, greenhouse gas tracking | 7.5×3.5km | Daily |
 | **Sentinel-6** | Ocean Topography | Sea level rise, ocean circulation, climate research | 300m | 10 days |
 
-## 🚀 Quick Start
+# 🚀 Installation
 
-### Prerequisites
+## Prerequisites
 - Python 3.11 or higher
 - pip package manager
 - Copernicus Data Space account (free registration required)
 
-## 🚀 Timeout Fixes & Progress Reporting
-
-### **Problem Solved**
-The server previously experienced timeout errors when downloading large satellite images because:
-1. **Insufficient timeouts**: 5-minute limit was too short for GB-sized files
-2. **No progress reporting**: MCP clients couldn't see if downloads were progressing
-3. **Silent failures**: Downloads could fail without clear error messages
-
-### **Solution Implemented**
-✅ **Increased Timeouts**:
-- Full downloads: 5 minutes → 2 hours (7200s)
-- Compressed downloads: 5 minutes → 1 hour (3600s)
-- Quicklook downloads: 1 minute → 2 minutes (120s)
-- API calls: 10 seconds → 60 seconds
-
-✅ **Progress Reporting**:
-- Regular updates every 10 seconds or 100MB
-- All progress sent to `stderr` for MCP client compatibility
-- Automatic buffer flushing to keep connections alive
-
-✅ **Enhanced Error Handling**:
-- Better timeout exception handling
-- File size verification after downloads
-- Graceful fallback between download endpoints
-
-### **For MCP Client Users**
-- Clients will now see regular progress updates during downloads
-- Large downloads (10+ GB) can complete without timeouts
-- Error messages are more descriptive and actionable
-
-### **Testing**
-Run the timeout test suite:
-```bash
-python test_download_timeout.py
-```
-
-See [TIMEOUT_FIXES.md](TIMEOUT_FIXES.md) for complete documentation.
-
-## 📦 Installation
+## 📦 Steps
 
 1. **Clone the repository:**
    ```bash
@@ -134,9 +73,24 @@ See [TIMEOUT_FIXES.md](TIMEOUT_FIXES.md) for complete documentation.
    $env:COPERNICUS_PASSWORD="your-password"
    ```
 
+   or in MCP Client...
+   ```json
+   {
+     "mcpServers": {
+       "copernicus": {
+         "command": "copernicus-mcp",
+         "env": {
+           "COPERNICUS_USERNAME": "your-email@example.com",
+           "COPERNICUS_PASSWORD": "your-password"
+         }
+       }
+     }
+   }
+   ```
+
    **Register for free at:** https://dataspace.copernicus.eu/
 
-### Authentication Test
+## Authentication Test
 Verify your credentials work:
 ```bash
 python -c "
@@ -156,9 +110,9 @@ asyncio.run(test())
 "
 ```
 
-## 📡 Running the Server
+# 📡 Running the Server
 
-### Basic Usage
+## Basic Usage
 ```bash
 # Run the MCP server
 python -m copernicus_mcp
@@ -167,7 +121,7 @@ python -m copernicus_mcp
 python -m copernicus_mcp.server
 ```
 
-### Command Line Options
+## Command Line Options
 ```bash
 # Show version
 python -m copernicus_mcp --version
@@ -176,31 +130,59 @@ python -m copernicus_mcp --version
 python -m copernicus_mcp --help
 ```
 
-### MCP Client Integration
-Add to your MCP client configuration (e.g., Claude Desktop, Zed):
+# 🔧 Configuration
 
-```json
-{
-  "mcpServers": {
-    "copernicus-eo": {
-      "command": "copernicus-mcp",
-      "args": [],
-      "env": {
-        "COPERNICUS_DEBUG_AUTH": "true"
-      },
-      "description": "Access Copernicus Earth Observation satellite data"
-    }
-  }
-}
+### Environment Variables
+
+| Variable | Description | Required For |
+|----------|-------------|--------------|
+| `COPERNICUS_USERNAME` | Copernicus Data Space email | Download operations |
+| `COPERNICUS_PASSWORD` | Copernicus Data Space password | Download operations |
+| `COPERNICUS_DEBUG_AUTH` | Enable authentication debugging | Debugging |
+| `COPERNICUS_TEST_REAL_DOWNLOAD` | Enable real download tests | Testing |
+
+## Default Directories
+- **Downloads**: `downloads/` (individual downloads)
+- **Batch Downloads**: `batch_downloads/` (batch operations)
+- **Search Results**: `search_downloads/` (search_and_download)
+
+## Performance Settings
+- **Max Concurrent Downloads**: 3 (configurable in `batch_download_images`)
+- **API Timeout**: 60 seconds
+- **Download Chunk Size**: 8KB
+- **Token Cache**: 4 minutes (with 1-minute buffer)
+
+# 🏗️ Architecture
+
+## Server Structure
+```
+copernicus-mcp/
+├── copernicus_mcp/          # Main package
+│   ├── server.py           # Complete server implementation
+│   ├── __init__.py         # Package exports
+│   └── server_corrupted_backup.py  # Backup
+├── examples/               # Usage examples
+│   └── example_download_usage.py
+├── requirements.txt        # Python dependencies
+├── pyproject.toml         # Project configuration
+├── README.md              # This file
+├── mcp_config.json        # MCP client configuration
+└── INSTALL.md             # Installation guide
 ```
 
-## 🛠️ Available Tools
+## Key Components
+1. **Authentication Manager**: Handles token acquisition, caching, and refresh
+2. **Search Engine**: Advanced query builder for Copernicus Data Space API
+3. **Download Manager**: Concurrent downloads with progress tracking
+4. **File Manager**: Disk space management and cleanup
+5. **MCP Interface**: FastMCP-based tool registration and protocol handling
 
-> **Note**: All download tools now include progress reporting and extended timeouts for large files.
 
-### **Search & Discovery Tools**
+# 🛠️ Available Tools
 
-#### 1. `search_copernicus_images`
+## **Search & Discovery Tools**
+
+### `search_copernicus_images`
 Search for satellite images from Copernicus missions.
 
 **Parameters:**
@@ -225,7 +207,7 @@ search_copernicus_images(
 )
 ```
 
-#### 2. `get_image_details`
+### `get_image_details`
 Get comprehensive metadata for a specific satellite image.
 
 **Parameters:**
@@ -234,7 +216,7 @@ Get comprehensive metadata for a specific satellite image.
 
 **Returns:** Detailed metadata including download URLs, processing level, cloud cover, footprint, and authentication guidance.
 
-#### 3. `get_mission_info`
+### `get_mission_info`
 Get detailed information about Copernicus satellite missions.
 
 **Parameters:**
@@ -242,7 +224,7 @@ Get detailed information about Copernicus satellite missions.
 
 **Returns:** Mission capabilities, sensors, applications, resolution, and revisit time.
 
-#### 4. `get_recent_images`
+### `get_recent_images`
 Get the most recent satellite images for a region.
 
 **Parameters:**
@@ -252,7 +234,7 @@ Get the most recent satellite images for a region.
 - `days_back`: Number of days to look back (default: 7)
 - `max_results`: Maximum results (default: 10)
 
-#### 5. `check_coverage`
+### `check_coverage`
 Analyze satellite image coverage for a region over time.
 
 **Parameters:**
@@ -262,9 +244,9 @@ Analyze satellite image coverage for a region over time.
 - `start_date`, `end_date`: Analysis period
 - `group_by`: Group results by 'day', 'week', 'month', or 'year'
 
-### **Download Tools**
+## **Download Tools**
 
-#### 6. `download_image`
+### `download_image`
 Download a Copernicus satellite image by ID.
 
 **Parameters:**
@@ -290,7 +272,7 @@ download_image(
 )
 ```
 
-#### 7. `batch_download_images`
+### `batch_download_images`
 Download multiple images concurrently.
 
 **Parameters:**
@@ -310,7 +292,7 @@ batch_download_images(
 )
 ```
 
-#### 8. `search_and_download`
+### `search_and_download`
 Search for images and automatically download the best match.
 
 **Parameters:**
@@ -336,7 +318,7 @@ search_and_download(
 )
 ```
 
-#### 9. `check_download_availability`
+### `check_download_availability`
 Check if images are available for download.
 
 **Parameters:**
@@ -344,7 +326,7 @@ Check if images are available for download.
 
 **Returns:** Availability status, file sizes, and quicklook availability for each image.
 
-#### 10. `get_product_download_links`
+### `get_product_download_links`
 Get all available download links for an image.
 
 **Parameters:**
@@ -352,9 +334,9 @@ Get all available download links for an image.
 
 **Returns:** All download URLs (full, compressed, quicklooks) with metadata.
 
-### **File Management Tools**
+## **File Management Tools**
 
-#### 11. `list_downloaded_files`
+### `list_downloaded_files`
 List downloaded satellite image files.
 
 **Parameters:**
@@ -371,7 +353,7 @@ list_downloaded_files(
 )
 ```
 
-#### 12. `cleanup_downloads`
+### `cleanup_downloads`
 Clean up downloaded files based on criteria.
 
 **Parameters:**
@@ -405,7 +387,7 @@ cleanup_downloads(
 )
 ```
 
-#### 13. `get_download_statistics`
+### `get_download_statistics`
 Get statistics about downloaded files.
 
 **Parameters:**
@@ -413,7 +395,7 @@ Get statistics about downloaded files.
 
 **Returns:** Comprehensive statistics including total files, size, breakdown by mission/file type/month, and oldest/newest files.
 
-## 📊 Complete Workflow Example
+# 📊 Complete Workflow Example
 
 ```python
 # 1. Search for images
@@ -451,200 +433,103 @@ files = list_downloaded_files(
 stats = get_download_statistics()
 ```
 
-## 🔧 Configuration
+# 🔒 Authentication Model
 
-### Environment Variables
-
-| Variable | Description | Required For |
-|----------|-------------|--------------|
-| `COPERNICUS_USERNAME` | Copernicus Data Space email | Download operations |
-| `COPERNICUS_PASSWORD` | Copernicus Data Space password | Download operations |
-| `COPERNICUS_DEBUG_AUTH` | Enable authentication debugging | Debugging |
-| `COPERNICUS_TEST_REAL_DOWNLOAD` | Enable real download tests | Testing |
-
-### Default Directories
-- **Downloads**: `downloads/` (individual downloads)
-- **Batch Downloads**: `batch_downloads/` (batch operations)
-- **Search Results**: `search_downloads/` (search_and_download)
-
-### Performance Settings
-- **Max Concurrent Downloads**: 3 (configurable in `batch_download_images`)
-- **API Timeout**: 60 seconds
-- **Download Chunk Size**: 8KB
-- **Token Cache**: 4 minutes (with 1-minute buffer)
-
-## 🧪 Testing
-
-### Test Scripts
-```bash
-# Test authentication and basic functionality
-python test_simple_download.py
-
-# Test end-to-end workflow (requires credentials)
-python test_download_e2e.py
-
-# Test with real credentials
-export COPERNICUS_USERNAME="your-email@example.com"
-export COPERNICUS_PASSWORD="your-password"
-python test_download_e2e.py
-```
-
-### Example Scripts
-```bash
-# Run complete examples
-python example_download_usage.py
-
-# Test specific functionality
-python test_fix.py
-```
-
-## 🏗️ Architecture
-
-### Server Structure
-```
-copernicus-mcp/
-├── copernicus_mcp/          # Main package
-│   ├── server.py           # Complete server implementation
-│   ├── __init__.py         # Package exports
-│   └── server_corrupted_backup.py  # Backup
-├── tests/                  # Test scripts
-│   ├── test_simple_download.py
-│   ├── test_download_e2e.py
-│   ├── test_fix.py
-│   └── test_download_tools.py
-├── examples/               # Usage examples
-│   └── example_download_usage.py
-├── requirements.txt        # Python dependencies
-├── pyproject.toml         # Project configuration
-├── README.md              # This file
-├── DOWNLOAD_FUNCTIONS_SUMMARY.md  # Detailed docs
-├── mcp_config.json        # MCP client configuration
-└── INSTALL.md             # Installation guide
-```
-
-### Key Components
-1. **Authentication Manager**: Handles token acquisition, caching, and refresh
-2. **Search Engine**: Advanced query builder for Copernicus Data Space API
-3. **Download Manager**: Concurrent downloads with progress tracking
-4. **File Manager**: Disk space management and cleanup
-5. **MCP Interface**: FastMCP-based tool registration and protocol handling
-
-## 🔒 Authentication Model
-
-### Public Access (No Authentication Required)
+## Public Access (No Authentication Required)
 - Mission information
 - Basic search operations
 - Metadata retrieval
 
-### Authenticated Access (Credentials Required)
+## Authenticated Access (Credentials Required)
 - Image downloads (full, quicklook, compressed)
 - Batch downloads
 - Availability checks
 - Download link retrieval
 
-### Token Management
+## Token Management
 - Automatic token acquisition from Copernicus Identity Service
 - Token caching with expiration handling
 - Graceful error handling for invalid credentials
 - Support for both environment variables and parameter-based authentication
 
-## ⚠️ Error Handling
+# ⚠️ Error Handling
 
 The server includes comprehensive error handling for:
 
-### Authentication Errors
+## Authentication Errors
 - Missing credentials
 - Invalid credentials
 - Token expiration
 - Rate limiting
 
-### API Errors
+## API Errors
 - Invalid image IDs
 - Unavailable products
 - Network timeouts
 - API quota exceeded
 
-### File System Errors
+## File System Errors
 - Insufficient disk space
 - Permission denied
 - Invalid file paths
 - Corrupted downloads
 
-### User Input Errors
+## User Input Errors
 - Invalid geometry formats
 - Unsupported mission parameters
 - Date range errors
 - Invalid download types
 
-## ⚡ Performance Considerations
+# ⚡ Performance Considerations
 
-### **Download Performance**
+## **Download Performance**
 - **Progress Reporting**: Updates every 10 seconds or 100MB
 - **Extended Timeouts**: Up to 2 hours for large downloads
 - **Chunk Size**: 1MB chunks for optimal throughput
 - **Concurrent Downloads**: Configurable (default: 3 concurrent)
 
-### **Timeout Configuration**
-The server now uses appropriate timeouts for different operations:
+## **Timeout Configuration**
+The server uses appropriate timeouts for different operations:
 - **Small files (quicklooks)**: 2 minutes
 - **Medium files (compressed)**: 1 hour  
 - **Large files (full products)**: 2 hours
 - **API requests**: 1 minute
 
-### **MCP Client Compatibility**
+## **MCP Client Compatibility**
 - All progress sent to `stderr` with regular flushing
 - Clients must monitor `stderr` for progress updates
 - Connection kept alive through periodic output
 
-### Download Sizes
+## Download Sizes
 - **Quicklooks**: 100KB - 1MB (recommended for testing)
 - **Compressed Products**: 100MB - 1GB
 - **Full Products**: 1GB - 10GB+ (varies by mission)
 
-### Network Usage
+## Network Usage
 - Start with quicklook downloads for testing
 - Use `max_concurrent` to control bandwidth usage
 - Monitor disk space for large downloads
 
-### API Limits
-- Respect Copernicus Data Space API rate limits
-- Use appropriate date ranges and geographic extents
-- Cache search results when possible
+# 🚨 Security Notes
 
-## 🚨 Security Notes
-
-### Credential Safety
+## Credential Safety
 - Never hardcode credentials in code
 - Use environment variables or secure credential stores
 - Tokens are automatically refreshed and never stored permanently
 - All authentication errors are logged without exposing sensitive information
 
-### Network Security
+## Network Security
 - All API calls use HTTPS with proper certificate validation
-- Download URLs are validated before use
 - Timeout settings prevent hanging connections
 
-### File Security
+## File Security
 - Downloaded files use standard file permissions
 - No automatic execution of downloaded content
 - Cleanup operations require explicit confirmation (dry-run mode by default)
 
-## 🔧 Troubleshooting
+# 🔧 Troubleshooting
 
-### **Timeout Issues**
-If you're still experiencing timeouts:
-
-1. **Check progress output**: Ensure your MCP client is reading from `stderr`
-2. **Increase timeouts**: For very slow connections, you can modify timeouts in `server.py`
-3. **Use quicklooks**: Test with `download_type="quicklook"` first
-4. **Monitor network**: Satellite images are large; expect 10-100 MB/min speeds
-
-### **Common Download Issues**
-- **No progress messages**: Update to latest version with timeout fixes
-- **Partial downloads**: Network interruptions may require retry
-- **Authentication errors**: Verify Copernicus credentials are set correctly
-
-### **Testing Your Setup**
+## **Testing Your Setup**
 ```bash
 # Test timeout fixes
 python test_download_timeout.py
@@ -653,14 +538,9 @@ python test_download_timeout.py
 python example_download_usage.py
 ```
 
-### **Getting Help**
-- Check [TIMEOUT_FIXES.md](TIMEOUT_FIXES.md) for detailed documentation
-- Review error messages in MCP client logs
-- Test with smaller files first to verify connectivity
+## Common Issues and Solutions
 
-### Common Issues and Solutions
-
-#### Authentication Failures
+### Authentication Failures
 ```bash
 # Check if credentials are set
 echo $COPERNICUS_USERNAME
@@ -677,138 +557,55 @@ asyncio.run(test())
 "
 ```
 
-#### Download Failures
+### Download Failures
 1. **Check disk space**: Ensure you have sufficient space for downloads
 2. **Verify image ID**: Use valid IDs from search results
 3. **Try quicklook first**: Test with smaller files before downloading full products
 4. **Check network**: Ensure stable internet connection
 
-#### Search Issues
+### Search Issues
 1. **Date range**: Use reasonable date ranges (e.g., last 30 days)
 2. **Geometry size**: Keep search areas manageable
 3. **Cloud cover**: Adjust cloud cover filters for optical missions
 
-### Debug Mode
+## Debug Mode
 Enable debug logging for detailed information:
 ```bash
 export COPERNICUS_DEBUG_AUTH=true
 python -m copernicus_mcp
 ```
 
-### Log Files
+## Log Files
 - Check application logs for detailed error messages
 - Monitor download progress in real-time
 - Review cleanup operations before execution
 
-## 🚨 Zed Timeout Fixes
+# 🚨 Zed Timeout Fixes
 
-### Issue Description
-Zed IDE (and other MCP clients) expect MCP tools to complete quickly (typically within 30-60 seconds). However, full satellite image downloads can take **hours** to complete. This mismatch causes Zed to kill download processes prematurely.
+## Issue Description
+Zed IDE (and other MCP clients) expect MCP tools to complete quickly (typically within 30-60 seconds). However, full satellite image downloads might take **hours** to complete. This mismatch causes Zed to kill download processes prematurely.
+you can increase MCP Tool timeout in Zed settings.
 
-### Implemented Fixes
+# 🙏 Acknowledgments
 
-#### 1. Extended Timeouts
-- **Configuration**: Increased `timeout_seconds` from 60 to 7200 (2 hours) in `mcp_config.json`
-- **Server Timeouts**: Full downloads now have 2-hour timeouts, compressed downloads 1 hour, quicklooks 2 minutes
-
-#### 2. Enhanced Progress Reporting
-- **Frequency**: Progress reported every **5 seconds** (was 10 seconds)
-- **Threshold**: Progress reported every **50MB** downloaded (was 100MB)
-- **Immediate Feedback**: Download start message with timestamp
-- **Buffer Flushing**: Frequent `sys.stderr.flush()` to ensure immediate output
-
-#### 3. User Warnings
-- **Clear Warnings**: Immediate warning about potential timeouts
-- **Quicklook Recommendation**: Explicit suggestion to use `download_type='quicklook'` for testing
-- **Tool Descriptions**: Updated with timeout warnings
-
-### Recommendations for Zed Users
-
-#### For Testing (ALWAYS RECOMMENDED)
-```python
-# Use quicklook for testing - fast and reliable
-download_image(
-    image_id="your-image-id",
-    mission="sentinel-2",
-    download_type="quicklook",  # ← RECOMMENDED FOR TESTING
-    output_dir="downloads"
-)
-```
-
-#### For Production (With Caution)
-```python
-# Full downloads may still timeout in Zed
-download_image(
-    image_id="your-image-id",
-    mission="sentinel-2", 
-    download_type="full",  # ← MAY TIMEOUT IN ZED
-    output_dir="downloads"
-)
-```
-
-### Monitoring Progress
-- **Check stderr**: Progress messages are sent to `stderr` every 5 seconds
-- **Look for**: "Download progress: X MB / Y MB (Z%)" messages
-- **Buffer Flushing**: Messages are flushed immediately to ensure visibility
-
-### Alternative Workflows
-
-#### Workflow 1: Search + Quicklook + External Download
-```
-Step 1: search_copernicus_images() - Find images (fast)
-Step 2: download_image(..., 'quicklook') - Preview (fast)  
-Step 3: If needed, use external tool (wget/curl) for full download
-```
-
-#### Workflow 2: Configure Zed (If Possible)
-- Check Zed's MCP client configuration
-- Increase timeout for the `copernicus-eo` server
-- Ensure Zed is reading stderr output
-
-### Testing the Fixes
-```bash
-# Simulate download behavior
-python test_simple_timeout.py --duration 30
-
-# Test quicklook simulation
-python test_simple_timeout.py --quicklook --analyze
-```
-
-### Known Limitations
-1. **MCP Protocol**: Designed for quick operations, not hours-long downloads
-2. **Client Timeouts**: Some MCP clients have hard-coded timeouts
-3. **Network Speed**: Large files (10+ GB) will always take significant time
-
-### Detailed Documentation
-See `ZED_TIMEOUT_FIXES_SUMMARY.md` for complete technical details and `TIMEOUT_FIXES.md` for implementation specifics.
-
-## 🙏 Acknowledgments
-
-### Data Providers
+## Data Providers
 - **European Space Agency (ESA)** for the Copernicus program
 - **Copernicus Data Space Ecosystem** for providing API access
 - **European Commission** for funding and support
 
-### Technical Dependencies
+## Technical Dependencies
 - **FastMCP** framework for MCP server implementation
 - **httpx** for async HTTP client functionality
 - **pydantic** for data validation and serialization
 - **shapely** for geometric operations
 
-## 📚 Additional Resources
+# 📚 Additional Resources
 
-### Documentation
+## Documentation
 - [Copernicus Data Space Documentation](https://documentation.dataspace.copernicus.eu/)
 - [MCP Protocol Specification](https://spec.modelcontextprotocol.io/)
 - [FastMCP Documentation](https://fastmcp.readthedocs.io/)
 
-### Tutorials and Examples
+## Tutorials and Examples
 - Complete workflow examples in `example_download_usage.py`
-- Test scripts for different scenarios
 - Configuration examples in `mcp_config.json`
-
----
-
-**Note**: This server is actively maintained. For the latest updates, check the GitHub repository and release notes.
-
-**Happy Earth Observation!** 🌍🛰️
